@@ -9,6 +9,67 @@ The direct experiment does not move APIM or create a temporary subnet. If Azure 
 
 The reference environment is **classic Premium / External**, but this PoC uses **Developer / External**, one unit and one region to reduce cost. **It does not demonstrate Premium SLA, availability or capacity.** Developer may be unavailable during updates. APIM infrastructure changes can take 15 minutes or longer.
 
+## Execution flow
+
+The diagram separates the direct occupied-subnet experiment from the explicitly
+selected temporary-subnet migration; rejection does not trigger automatic fallback.
+Arrows show execution order, the diamond selects an operation, and rectangles
+represent steps or outcomes. Error paths are summarized: any migration-stage
+failure stops execution and records evidence, without automatic rollback.
+Each migration stage checks state and point-in-time HTTP health; these checks do
+not demonstrate continuous availability.
+
+Editable standalone source: [APIM subnet expansion flow](apim-subnet-resize-flow.mmd).
+Keep that source and the embedded diagram below in sync.
+
+```mermaid
+---
+title: APIM subnet expansion - direct experiment and temporary migration
+config:
+  layout: elk
+---
+flowchart LR
+    target["Resolve lab target<br/>Explicit parameters override local .env"]
+    mode{"Selected operation"}
+    skipped["Skipped<br/>No Azure mutation"]
+    failure["Record failure and stop<br/>No automatic rollback or resubmission"]
+
+    subgraph direct["Invoke-SubnetExperiment.ps1 - TryResizeOccupied"]
+        directPre["Capture snapshot<br/>Validate occupied original /27 and lab safeguards"]
+        attempt["Request original subnet expansion<br/>/27 to /26 while APIM remains attached"]
+        verify["Capture resulting state<br/>Verify /26 and unchanged APIM subnet"]
+        directDone["ControlPlaneSucceeded<br/>Gateway availability checked separately"]
+        directPre -->|"Approves mutation"| attempt
+        attempt -->|"Azure accepts update"| verify
+        verify -->|"Postconditions pass"| directDone
+    end
+
+    subgraph migration["Invoke-SubnetMigration.ps1 - Run"]
+        migrationPre["Capture snapshot and validate lab<br/>Require original /27 and no temporary subnet"]
+        prepare["PrepareTemporary<br/>Create temporary /27 with original NSG"]
+        moveTemporary["MoveTemporary<br/>Submit APIM move and poll target + Succeeded"]
+        release["ResizeEmpty: wait for release<br/>Poll until original subnet has no allocations"]
+        resize["ResizeEmpty: expand original<br/>Update empty /27 to /26"]
+        moveBack["MoveBack<br/>Return APIM and poll target + Succeeded"]
+        migrationDone["Verified<br/>Original /26 in use; temporary subnet retained"]
+        migrationPre -->|"Approves mutation"| prepare
+        prepare -->|"Verifies state and health"| moveTemporary
+        moveTemporary -->|"Verifies state and health"| release
+        release -->|"Confirms original is empty"| resize
+        resize -->|"Verifies state and health"| moveBack
+        moveBack -->|"Verifies state and health"| migrationDone
+    end
+
+    target -->|"Resolves required identifiers"| mode
+    mode -->|"Selects direct experiment"| directPre
+    mode -->|"Selects full migration"| migrationPre
+    directPre -->|"Declines or uses WhatIf"| skipped
+    migrationPre -->|"Declines or uses WhatIf"| skipped
+    attempt -->|"Azure rejects or fails"| failure
+    verify -->|"Postconditions fail"| failure
+    release -->|"Times out without resizing"| failure
+```
+
 ## Documentation language
 
 **English is the default language for all repository documentation**, including Markdown files, headings, tables, example comments and explanatory messages in documentation examples. Preserve script parameters, recorded outcomes and evidence paths; keep real environment identifiers in local configuration rather than published examples.
