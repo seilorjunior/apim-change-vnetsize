@@ -1,0 +1,6 @@
+artifacts/
+.env
+.env.*
+!.env.example
+infra/main.json
+infra/main.parameters.json
