@@ -1,15 +1,24 @@
 #Requires -Version 7.0
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][uri]$Url,
+    [uri]$Url,
     [ValidateRange(1, 1440)][int]$DurationMinutes = 180,
     [ValidateRange(1, 60)][int]$IntervalSeconds = 5,
     [ValidateRange(1, 120)][int]$RequestTimeoutSeconds = 10,
-    [string]$EvidenceRoot = (Join-Path $PSScriptRoot '..\artifacts')
+    [string]$EvidenceRoot = (Join-Path $PSScriptRoot '..\artifacts'),
+    [string]$EnvFile = (Join-Path $PSScriptRoot '..\.env')
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
-if ($Url.Scheme -ne 'https' -or $Url.DnsSafeHost -notmatch '^apim-resize-poc-[a-z0-9-]+\.azure-api\.net$' -or
+if (-not $PSBoundParameters.ContainsKey('Url')) {
+    $settings = Get-LabEnvironment -EnvFile $EnvFile
+    $apimName = [string]$settings['APIM_NAME']
+    if ($apimName -notmatch '^apim-resize-poc-[a-zA-Z0-9-]+$') {
+        throw 'Set a valid lab APIM_NAME in the environment file or supply -Url.'
+    }
+    $Url = [uri]"https://$apimName.azure-api.net/subnet-poc/health"
+}
+if (-not $Url -or -not $Url.IsAbsoluteUri -or $Url.Scheme -ne 'https' -or $Url.DnsSafeHost -notmatch '^apim-resize-poc-[a-z0-9-]+\.azure-api\.net$' -or
     $Url.AbsolutePath -ne '/subnet-poc/health' -or $Url.Query -or $Url.UserInfo -or -not $Url.IsDefaultPort) {
     throw 'Use only the HTTPS mock endpoint of this lab in Azure public cloud.'
 }

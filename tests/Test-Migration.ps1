@@ -1,17 +1,18 @@
 #Requires -Version 7.0
 [CmdletBinding()]
-param()
+param([string]$TestEnvFile = (Join-Path $PSScriptRoot '..\.env.test'))
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '..\scripts\Common.ps1')
+. (Join-Path $PSScriptRoot 'Common.ps1')
+$testEnvironment = Get-TestEnvironment -EnvFile $TestEnvFile
 $script:passed = 0
 function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw "FAIL: $Message" }
     $script:passed++
 }
-$subscription = '00000000-0000-0000-0000-000000000001'
-$group = 'rg-apim-resize-poc-test'
-$apimName = 'apim-resize-poc-test'
+$subscription = $testEnvironment.Target.SubscriptionId
+$group = $testEnvironment.Target.ResourceGroup
+$apimName = $testEnvironment.Target.ApimName
 $root = "/subscriptions/$subscription/resourceGroups/$group"
 $vnetId = "$root/providers/Microsoft.Network/virtualNetworks/vnet-apim-resize-poc"
 $originalId = "$vnetId/subnets/snet-apim-original"
@@ -22,11 +23,11 @@ $fixture = @{
     apim = @{
         id = "$root/providers/Microsoft.ApiManagement/service/$apimName"; tags = $tags
         sku = @{ name = 'Developer'; capacity = 1 }; platformVersion = 'stv2'
-        virtualNetworkType = 'External'; provisioningState = 'Succeeded'; location = 'East US 2'
+        virtualNetworkType = 'External'; provisioningState = 'Succeeded'; location = $testEnvironment.Location
         virtualNetworkConfiguration = @{ subnetResourceId = $originalId }
     }
     vnet = @{
-        id = $vnetId; tags = $tags; location = 'eastus2'; provisioningState = 'Succeeded'
+        id = $vnetId; tags = $tags; location = $testEnvironment.Location; provisioningState = 'Succeeded'
         addressSpace = @{ addressPrefixes = @('10.90.0.0/16') }
         subnets = @(@{ id = $originalId; name = 'snet-apim-original' })
         dhcpOptions = @{ dnsServers = @() }

@@ -22,6 +22,11 @@ The execution moved APIM to a temporary subnet, waited for the original subnet t
 | Temporary subnet | `snet-apim-temporary`, prefix `10.90.1.0/27` |
 | Scope | Proof of concept in a lab environment |
 
+For current script usage, see [local environment configuration](README.md#local-environment-configuration).
+Operational scripts read `.env`; [offline tests](README.md#offline-test-configuration)
+read a separate synthetic `.env.test`. Offline test results do not replace the
+historical Azure execution evidence summarized here.
+
 ## Duration and stages
 
 The `Run` execution started on **September 23, 2026, at 14:16:38** and finished at **15:29:26**, in **UTC-3**. The exact UTC timestamps are `2026-09-23T17:16:38.0116511Z` and `2026-09-23T18:29:26.6558675Z`; the difference is **4,368.644 seconds**.

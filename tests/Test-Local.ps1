@@ -1,8 +1,9 @@
 #Requires -Version 7.0
 [CmdletBinding()]
-param()
+param([string]$TestEnvFile = (Join-Path $PSScriptRoot '..\.env.test'))
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '..\scripts\Common.ps1')
+. (Join-Path $PSScriptRoot 'Common.ps1')
+$testEnvironment = Get-TestEnvironment -EnvFile $TestEnvFile
 $script:passed = 0
 
 function Assert-True {
@@ -18,9 +19,9 @@ function Assert-Throws {
     Assert-True $threw $Message
 }
 
-$subscription = '00000000-0000-0000-0000-000000000001'
-$group = 'rg-apim-resize-poc-test'
-$apimName = 'apim-resize-poc-test'
+$subscription = $testEnvironment.Target.SubscriptionId
+$group = $testEnvironment.Target.ResourceGroup
+$apimName = $testEnvironment.Target.ApimName
 $root = "/subscriptions/$subscription/resourceGroups/$group"
 $vnetId = "$root/providers/Microsoft.Network/virtualNetworks/vnet-apim-resize-poc"
 $originalId = "$vnetId/subnets/snet-apim-original"
@@ -34,13 +35,13 @@ $script:state = @{
         virtualNetworkType = 'External'
         additionalLocations = $null
         provisioningState = 'Succeeded'
-        location = 'East US 2'
+        location = $testEnvironment.Location
         virtualNetworkConfiguration = @{ subnetResourceId = $originalId }
     }
     vnet = @{
         id = $vnetId
         tags = @{ purpose = 'apim-subnet-resize-poc' }
-        location = 'eastus2'
+        location = $testEnvironment.Location
         provisioningState = 'Succeeded'
         addressSpace = @{ addressPrefixes = @('10.90.0.0/16') }
         subnets = @(@{ id = $originalId })
@@ -55,6 +56,10 @@ $script:state = @{
 }
 $pristine = $script:state | ConvertTo-Json -Depth 20
 $labArgs = @{ SubscriptionId = $subscription; ResourceGroup = $group; ApimName = $apimName }
+Assert-LabState -State $script:state @labArgs
+Assert-True $true 'Matching configured canonical regions must remain accepted.'
+$script:state.apim.location = 'East US 2'
+$script:state.vnet.location = 'eastus2'
 Assert-LabState -State $script:state @labArgs
 Assert-True $true 'APIM display region and Network canonical region must match.'
 $script:state.apim.location = 'eastus2'
@@ -71,7 +76,7 @@ foreach ($case in @(
     @{ Name = 'Untagged resources must be rejected'; Edit = { $script:state.group.tags.purpose = 'production' } },
     @{ Name = 'Cross-group resources must be rejected'; Edit = { $script:state.original.id = '/another/subnet' } },
     @{ Name = 'In-progress update must be rejected'; Edit = { $script:state.apim.provisioningState = 'Updating' } },
-    @{ Name = 'Different regions must be rejected'; Edit = { $script:state.apim.location = 'East US' } },
+    @{ Name = 'Different regions must be rejected'; Edit = { $script:state.apim.location = "$($script:state.vnet.location)-different" } },
     @{ Name = 'Missing APIM region must be rejected'; Edit = { $script:state.apim.Remove('location') } },
     @{ Name = 'Null Network region must be rejected'; Edit = { $script:state.vnet.location = $null } },
     @{ Name = 'Blank regions must be rejected'; Edit = { $script:state.apim.location = ' '; $script:state.vnet.location = ' ' } },
@@ -117,6 +122,9 @@ $global:ApimResizeTestContext = @{
     Mutations = 0
     RejectResize = $true
     PreservePrefix = $false
+    ProbeCalls = 0
+    ProbeUrl = "https://$apimName.azure-api.net/subnet-poc/health"
+    UnexpectedProbe = $false
 }
 function az {
     $arguments = @($args)
@@ -146,6 +154,13 @@ function az {
     throw "Unexpected mock CLI invocation: $command"
 }
 function Invoke-WebRequest {
+    param($Uri, $TimeoutSec, [switch]$SkipHttpErrorCheck, $MaximumRedirection)
+    $context = $global:ApimResizeTestContext
+    $context.ProbeCalls++
+    if ([string]$Uri -ne $context.ProbeUrl -or $MaximumRedirection -ne 0) {
+        $context.UnexpectedProbe = $true
+        throw 'Unexpected mock HTTP request.'
+    }
     if ($global:ApimResizeTestContext.Probe.Throw) { throw 'Simulated network timeout' }
     return $global:ApimResizeTestContext.Probe.Response
 }
@@ -194,33 +209,76 @@ try {
     Assert-Throws {
         & $monitor -Url 'https://example.com/subnet-poc/health' -EvidenceRoot $evidence
     } 'Monitor must reject non-lab endpoints.'
-    foreach ($probeCase in @(
-        @{ Name = 'Exact mock'; Code = 200; Body = '{"status":"ok","poc":"apim-subnet-resize"}'; Throw = $false; Expected = $true },
-        @{ Name = 'Extra field'; Code = 200; Body = '{"status":"ok","poc":"apim-subnet-resize","extra":true}'; Throw = $false; Expected = $false },
-        @{ Name = 'Wrong payload'; Code = 200; Body = '{"status":"bad","poc":"apim-subnet-resize"}'; Throw = $false; Expected = $false },
-        @{ Name = 'Malformed JSON'; Code = 200; Body = 'not json'; Throw = $false; Expected = $false },
-        @{ Name = 'HTTP 503'; Code = 503; Body = '{}'; Throw = $false; Expected = $false },
-        @{ Name = 'Network timeout'; Code = 0; Body = ''; Throw = $true; Expected = $false }
+    $invalidEvidence = Join-Path $evidence 'invalid-monitor'
+    $missingConfig = Join-Path $evidence '.env.missing'
+    Assert-Throws { & $monitor -EnvFile $missingConfig -EvidenceRoot $invalidEvidence } 'Monitor must reject missing environment files.'
+    foreach ($url in @($null, '', '/subnet-poc/health', 'http://example.com/', "https://$apimName.azure-api.net/subnet-poc/health?query=1")) {
+        Assert-Throws { & $monitor -Url $url -EnvFile $TestEnvFile -EvidenceRoot $invalidEvidence } 'Invalid explicit URLs must not fall back to configuration.'
+    }
+    $monitorProject = Join-Path $evidence 'monitor-project'
+    $monitorScripts = Join-Path $monitorProject 'scripts'
+    New-Item -ItemType Directory -Path $monitorScripts -Force | Out-Null
+    foreach ($name in @('Common.ps1', 'Watch-Gateway.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\scripts\$name") -Destination $monitorScripts
+    }
+    $monitorConfig = Join-Path $monitorProject '.env'
+    foreach ($lines in @(
+        @{ Values = @('# missing name') },
+        @{ Values = @('APIM_NAME=') },
+        @{ Values = @('APIM_NAME=production') },
+        @{ Values = @('APIM_NAME="unclosed') },
+        @{ Values = @('APIM_NAME=one', 'APIM_NAME=two') }
     )) {
-        $global:ApimResizeTestContext.Probe = @{
-            Throw = $probeCase.Throw
-            Response = @{ StatusCode = $probeCase.Code; Content = $probeCase.Body }
-        }
-        $existing = @(Get-ChildItem -LiteralPath $evidence -Directory).FullName
-        try {
-            & $monitor -Url 'https://apim-resize-poc-test.azure-api.net/subnet-poc/health' -EvidenceRoot $evidence | Out-Null
-            throw 'Monitor should have reached the test stop.'
-        } catch {
-            if ($_.Exception.Message -ne 'TestStopAfterOneSample') { throw }
-        }
-        $newDirectory = @(Get-ChildItem -LiteralPath $evidence -Directory | Where-Object { $_.FullName -notin $existing })
-        Assert-True ($newDirectory.Count -eq 1) "One evidence directory: $($probeCase.Name)"
-        $rows = @(Import-Csv -LiteralPath (Join-Path $newDirectory[0].FullName 'samples.csv'))
-        $report = Get-Content -LiteralPath (Join-Path $newDirectory[0].FullName 'summary.json') -Raw | ConvertFrom-Json
-        Assert-True ($rows.Count -eq 1 -and $rows[0].success -eq [string]$probeCase.Expected) "Recorded probe result: $($probeCase.Name)"
-        Assert-True ($report.successfulSamples -eq [int]$probeCase.Expected) "Persisted probe summary: $($probeCase.Name)"
-        if (-not $probeCase.Expected) {
-            Assert-True (-not [string]::IsNullOrWhiteSpace($rows[0].error)) "Failures expose errors: $($probeCase.Name)"
+        $lines.Values | Set-Content -LiteralPath $monitorConfig -Encoding utf8
+        Assert-Throws { & $monitor -EnvFile $monitorConfig -EvidenceRoot $invalidEvidence } 'Monitor must reject invalid environment configuration.'
+    }
+    Assert-True (-not (Test-Path -LiteralPath $invalidEvidence)) 'Invalid monitor targets create no evidence.'
+    Assert-True ($global:ApimResizeTestContext.ProbeCalls -eq 0) 'Invalid monitor targets make no HTTP calls.'
+    "APIM_NAME=$apimName" | Set-Content -LiteralPath $monitorConfig -Encoding utf8
+    $overrideConfig = Join-Path $monitorProject '.env.override'
+    "APIM_NAME=$apimName-override" | Set-Content -LiteralPath $overrideConfig -Encoding utf8
+    $testUrl = $global:ApimResizeTestContext.ProbeUrl
+    $absoluteTestEnvFile = (Resolve-Path -LiteralPath $TestEnvFile).ProviderPath
+    $monitorModes = @(
+        @{ Name = 'Explicit URL without config'; Entry = $monitor; Arguments = @{ Url = $testUrl; EnvFile = $missingConfig } },
+        @{ Name = 'Explicit URL overrides config'; Entry = $monitor; Arguments = @{ Url = $testUrl; EnvFile = $overrideConfig } },
+        @{ Name = 'Custom environment file'; Entry = $monitor; Arguments = @{ EnvFile = $absoluteTestEnvFile } },
+        @{ Name = 'Project-root environment file'; Entry = (Join-Path $monitorScripts 'Watch-Gateway.ps1'); Arguments = @{} }
+    )
+    foreach ($mode in $monitorModes) {
+        foreach ($probeCase in @(
+            @{ Name = 'Exact mock'; Code = 200; Body = '{"status":"ok","poc":"apim-subnet-resize"}'; Throw = $false; Expected = $true },
+            @{ Name = 'Extra field'; Code = 200; Body = '{"status":"ok","poc":"apim-subnet-resize","extra":true}'; Throw = $false; Expected = $false },
+            @{ Name = 'Wrong payload'; Code = 200; Body = '{"status":"bad","poc":"apim-subnet-resize"}'; Throw = $false; Expected = $false },
+            @{ Name = 'Malformed JSON'; Code = 200; Body = 'not json'; Throw = $false; Expected = $false },
+            @{ Name = 'HTTP 503'; Code = 503; Body = '{}'; Throw = $false; Expected = $false },
+            @{ Name = 'Network timeout'; Code = 0; Body = ''; Throw = $true; Expected = $false }
+        )) {
+            $global:ApimResizeTestContext.Probe = @{
+                Throw = $probeCase.Throw
+                Response = @{ StatusCode = $probeCase.Code; Content = $probeCase.Body }
+            }
+            $existing = @(Get-ChildItem -LiteralPath $evidence -Directory).FullName
+            $monitorArguments = $mode.Arguments
+            $callsBefore = $global:ApimResizeTestContext.ProbeCalls
+            Push-Location ([IO.Path]::GetTempPath())
+            try {
+                & $mode.Entry @monitorArguments -EvidenceRoot $evidence | Out-Null
+                throw 'Monitor should have reached the test stop.'
+            } catch {
+                if ($_.Exception.Message -ne 'TestStopAfterOneSample') { throw }
+            } finally { Pop-Location }
+            Assert-True ($global:ApimResizeTestContext.ProbeCalls -eq $callsBefore + 1 -and
+                -not $global:ApimResizeTestContext.UnexpectedProbe) "Configured endpoint called once: $($mode.Name)"
+            $newDirectory = @(Get-ChildItem -LiteralPath $evidence -Directory | Where-Object { $_.FullName -notin $existing })
+            Assert-True ($newDirectory.Count -eq 1) "One evidence directory: $($probeCase.Name)"
+            $rows = @(Import-Csv -LiteralPath (Join-Path $newDirectory[0].FullName 'samples.csv'))
+            $report = Get-Content -LiteralPath (Join-Path $newDirectory[0].FullName 'summary.json') -Raw | ConvertFrom-Json
+            Assert-True ($rows.Count -eq 1 -and $rows[0].success -eq [string]$probeCase.Expected) "Recorded probe result: $($probeCase.Name)"
+            Assert-True ($report.successfulSamples -eq [int]$probeCase.Expected) "Persisted probe summary: $($probeCase.Name)"
+            if (-not $probeCase.Expected) {
+                Assert-True (-not [string]::IsNullOrWhiteSpace($rows[0].error)) "Failures expose errors: $($probeCase.Name)"
+            }
         }
     }
 } finally {
@@ -230,7 +288,8 @@ try {
     Remove-Variable -Name ApimResizeTestContext -Scope Global
     if (Test-Path -LiteralPath $evidence) {
         Get-ChildItem -LiteralPath $evidence -File -Recurse | Remove-Item
-        Get-ChildItem -LiteralPath $evidence -Directory | Remove-Item
+        Get-ChildItem -LiteralPath $evidence -Directory -Recurse |
+            Sort-Object { $_.FullName.Length } -Descending | Remove-Item
         Remove-Item -LiteralPath $evidence
     }
 }

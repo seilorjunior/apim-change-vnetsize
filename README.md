@@ -46,6 +46,7 @@ The mock API is public, requires no subscription key, exposes no real data and c
 - [Offline tests](tests/Test-Local.ps1)
 - [Offline migration tests](tests/Test-Migration.ps1)
 - [Local configuration template](.env.example)
+- [Synthetic test configuration template](.env.test.example)
 - [Offline configuration tests](tests/Test-Environment.ps1)
 
 ## Local environment configuration
@@ -75,13 +76,20 @@ three target parameters are supplied, the scripts do not read an environment fil
 Shell environment variables and the Azure CLI default subscription are not used
 as fallbacks. Missing or invalid targets fail before Azure calls and run logs.
 
+The HTTP monitor also reads `.env` by default, but needs only `APIM_NAME` to
+derive `https://<APIM_NAME>.azure-api.net/subnet-poc/health`. Its optional `-Url`
+parameter takes precedence and bypasses configuration loading. `-EnvFile` selects
+an alternative local file. An explicitly empty/invalid URL is rejected, not
+replaced by a configuration value. Validation happens before HTTP calls or
+evidence creation; the monitor still accepts only the lab HTTPS endpoint.
+
 Use one `KEY=value` per line. Blank lines and full-line `#` comments are allowed.
 Matching single or double quotes around values are optional. Values are literal:
 there is no interpolation, command execution, escape processing, inline-comment
 removal or process-environment modification. Unknown or duplicate keys are rejected.
 Use only the keys listed in the example.
 
-For manual commands or the HTTP monitor, load variables in each new terminal
+For manual deployment, inspection or cleanup commands, load variables in each new terminal
 from the project root (this block does not call Azure):
 
 ```powershell
@@ -94,7 +102,6 @@ $apim = $lab.ApimName
 $location = $settings['AZURE_LOCATION']
 $tenant = $settings['AZURE_TENANT_ID']
 $email = $settings['APIM_PUBLISHER_EMAIL']
-$probeUrl = "https://$apim.azure-api.net/subnet-poc/health"
 ```
 
 `AZURE_SUBSCRIPTION_NAME` and `LAB_DEPLOYMENT_CORRELATION_ID` are optional
@@ -110,11 +117,59 @@ environment identifiers. Subscription and tenant examples are synthetic.
 Restarting history does not erase existing clones, reflogs, unreachable Git
 objects or local evidence. Review all tracked files before public release.
 
+## Offline test configuration
+
+Operational scripts use the private `.env`; **offline tests use a separate
+`.env.test` with fictitious data**. Both local files are ignored by Git.
+Only the templates [.env.example](.env.example) and
+[.env.test.example](.env.test.example) are publishable.
+
+Before running tests on a fresh clone, copy the synthetic template without
+overwriting an existing test configuration:
+
+```powershell
+if (-not (Test-Path -LiteralPath '.env.test')) {
+    Copy-Item -LiteralPath '.env.test.example' -Destination '.env.test'
+}
+```
+
+All three test entrypoints accept `-TestEnvFile`:
+
+```powershell
+pwsh -File .\tests\Test-Environment.ps1 -TestEnvFile 'C:\labs\.env.test'
+pwsh -File .\tests\Test-Local.ps1 -TestEnvFile 'C:\labs\.env.test'
+pwsh -File .\tests\Test-Migration.ps1 -TestEnvFile 'C:\labs\.env.test'
+```
+
+The default `.env.test` path is relative to the project root, not the current
+directory. Missing or invalid test configuration fails explicitly; there is no
+fallback to `.env`, the example file or shell environment variables. The shared
+[test loader](tests/Common.ps1) reuses the literal environment parser and rejects
+files named `.env`. Test configuration accepts exactly these four required keys:
+
+| Key | Synthetic fixture requirement |
+|---|---|
+| `AZURE_SUBSCRIPTION_ID` | Nonzero GUID starting with `00000000-0000-0000-0000-` |
+| `AZURE_RESOURCE_GROUP` | `rg-apim-resize-poc-test`, optionally followed by a hyphenated suffix |
+| `APIM_NAME` | `apim-resize-poc-test`, optionally followed by a hyphenated suffix |
+| `AZURE_LOCATION` | Canonical lowercase region name, such as `eastus2` |
+
+Never copy real subscription, tenant, resource or publisher values into test
+configuration. These conventions identify fixtures, not deployable resources.
+The tests mock Azure CLI and HTTP and require no Azure sign-in. Integration cases
+create temporary **fictitious** `.env` files to exercise operational configuration
+loading and clean them up afterward; they do not read the real project `.env`.
+
+Fixed VNet/subnet names, CIDRs and deliberate invalid-input or normalization
+examples remain in the tests because they verify the lab's safety contract.
+Moving baseline identities and region into configuration does not relax these
+guards or make the scripts suitable for arbitrary networks.
+
 ## 1. Prepare and validate locally
 
 Requires PowerShell 7 (`pwsh`), Azure CLI and Bicep CLI. Deployment also requires Azure sign-in, an authorized subscription, registered `Microsoft.Network` and `Microsoft.ApiManagement` providers, and permissions to create, modify and delete lab resources. No script changes the default subscription.
 
-From the project root:
+From the project root, after creating `.env.test` as described above:
 
 ```powershell
 pwsh -File .\tests\Test-Local.ps1
@@ -123,7 +178,7 @@ pwsh -File .\tests\Test-Environment.ps1
 bicep build .\infra\main.bicep --outfile "$env:TEMP\apim-resize-poc-validation.json"
 ```
 
-The tests mock Azure CLI to validate safeguards, single-attempt behavior, errors, evidence and calculations. Compiling Bicep or running `what-if` **does not prove** that Azure will allow an occupied subnet to expand.
+The tests mock Azure CLI and HTTP to validate safeguards, configuration isolation, monitor target overrides, single-attempt behavior, errors, evidence and calculations. Compiling Bicep or running `what-if` **does not prove** that Azure will allow an occupied subnet to expand.
 
 ## 2. Deploy only after approval
 
@@ -301,13 +356,15 @@ For an individual stage, replace `Run` with the action name and run with `-WhatI
 
 ## Optional HTTP monitoring
 
-Monitoring is not required to record Azure's response. To observe the gateway during the attempt, load the local configuration variables in a separate terminal and keep this command running:
+Monitoring is not required to record Azure's response. To observe the gateway during the attempt, fill in `APIM_NAME` in the local `.env`, then keep this command running in a separate terminal. No manual variable-loading step is needed:
 
 ```powershell
 .\scripts\Watch-Gateway.ps1 `
-  -Url $probeUrl `
   -DurationMinutes 180 -IntervalSeconds 5
 ```
+
+Use `-EnvFile 'C:\labs\.env'` for another operational configuration, or pass
+`-Url` explicitly to bypass the file. Do not use `.env.test` for live monitoring.
 
 Collect at least 60 seconds of failure-free baseline before the attempt and observe another 60 seconds afterward. The monitor continuously writes CSV and produces a summary when it finishes or handles Ctrl+C normally. An abrupt process termination leaves the CSV already written.
 

@@ -1,8 +1,9 @@
 #Requires -Version 7.0
 [CmdletBinding()]
-param()
+param([string]$TestEnvFile = (Join-Path $PSScriptRoot '..\.env.test'))
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '..\scripts\Common.ps1')
+. (Join-Path $PSScriptRoot 'Common.ps1')
+$testEnvironment = Get-TestEnvironment -EnvFile $TestEnvFile
 $script:passed = 0
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -20,11 +21,7 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ("apim-env-tests-{0}" -f [guid]::Ne
 $scripts = Join-Path $root 'scripts'
 $envFile = Join-Path $root '.env'
 $missingFile = Join-Path $root '.env.missing'
-$lab = @{
-    SubscriptionId = '00000000-0000-0000-0000-000000000001'
-    ResourceGroup = 'rg-apim-resize-poc-test'
-    ApimName = 'apim-resize-poc-test'
-}
+$lab = $testEnvironment.Target
 $valid = @("AZURE_SUBSCRIPTION_ID=$($lab.SubscriptionId)",
     "AZURE_RESOURCE_GROUP=$($lab.ResourceGroup)", "APIM_NAME=$($lab.ApimName)")
 if (Get-Variable ApimEnvironmentTestContext -Scope Global -ErrorAction SilentlyContinue) {
@@ -36,9 +33,9 @@ function az {
     $c = $global:ApimEnvironmentTestContext
     $c.Calls++
     $command = $args -join ' '
-    if ($command -notmatch '--subscription 00000000-0000-0000-0000-000000000001' -or
-        ($command -notmatch '--resource-group rg-apim-resize-poc-test' -and
-         $command -notmatch 'group show --name rg-apim-resize-poc-test')) {
+    if ($command -notmatch ("--subscription {0}( |$)" -f [regex]::Escape($c.Expected.SubscriptionId)) -or
+        ($command -notmatch ("--resource-group {0}( |$)" -f [regex]::Escape($c.Expected.ResourceGroup)) -and
+         $command -notmatch ("group show --name {0}( |$)" -f [regex]::Escape($c.Expected.ResourceGroup)))) {
         throw 'Unexpected mock target.'
     }
     if ($command -notmatch '^(group show|apim show|network vnet show|network vnet subnet show) ') {
@@ -54,6 +51,32 @@ function az {
 try {
     New-Item -ItemType Directory -Path $scripts | Out-Null
     $valid | Set-Content -LiteralPath $envFile -Encoding utf8
+    $testFixture = Join-Path $root '.env.test'
+    $testLines = $valid + "AZURE_LOCATION=$($testEnvironment.Location)"
+    $testLines | Set-Content -LiteralPath $testFixture -Encoding utf8
+    $testLoaded = Get-TestEnvironment -EnvFile $testFixture
+    foreach ($key in $lab.Keys) {
+        Assert-True ($testLoaded.Target[$key] -eq $lab[$key]) "Test target $key comes from test configuration"
+    }
+    Assert-True ($testLoaded.Location -eq $testEnvironment.Location) 'Test region comes from test configuration'
+    Assert-Throws { Get-TestEnvironment -EnvFile $envFile } 'must not load operational'
+    Assert-Throws { Get-TestEnvironment -EnvFile $missingFile } 'not found.*\.env.test.example'
+    foreach ($key in @('AZURE_SUBSCRIPTION_ID', 'AZURE_RESOURCE_GROUP', 'APIM_NAME', 'AZURE_LOCATION')) {
+        $testLines | Where-Object { -not $_.StartsWith("$key=") } | Set-Content -LiteralPath $testFixture -Encoding utf8
+        Assert-Throws { Get-TestEnvironment -EnvFile $testFixture } "Missing $key"
+    }
+    foreach ($case in @(
+        @{ Lines = $testLines.Replace("AZURE_SUBSCRIPTION_ID=$($lab.SubscriptionId)", 'AZURE_SUBSCRIPTION_ID=11111111-1111-1111-1111-111111111111'); Pattern = 'synthetic test identifiers' },
+        @{ Lines = $testLines.Replace("AZURE_SUBSCRIPTION_ID=$($lab.SubscriptionId)", "AZURE_SUBSCRIPTION_ID=$([guid]::Empty)"); Pattern = 'non-empty GUID' },
+        @{ Lines = $testLines.Replace("AZURE_RESOURCE_GROUP=$($lab.ResourceGroup)", 'AZURE_RESOURCE_GROUP=rg-apim-resize-poc-live'); Pattern = 'synthetic test identifiers' },
+        @{ Lines = $testLines.Replace("APIM_NAME=$($lab.ApimName)", 'APIM_NAME=apim-resize-poc-live'); Pattern = 'synthetic test identifiers' },
+        @{ Lines = $testLines.Replace("AZURE_LOCATION=$($testEnvironment.Location)", 'AZURE_LOCATION=East US 2'); Pattern = 'canonical lowercase' },
+        @{ Lines = $testLines + 'AZURE_TENANT_ID=00000000-0000-0000-0000-000000000002'; Pattern = 'only the four keys' },
+        @{ Lines = $testLines + 'APIM_NAME=duplicate'; Pattern = 'Unknown or duplicate' }
+    )) {
+        $case.Lines | Set-Content -LiteralPath $testFixture -Encoding utf8
+        Assert-Throws { Get-TestEnvironment -EnvFile $testFixture } $case.Pattern
+    }
     $loaded = Get-LabEnvironment -EnvFile $envFile
     Assert-True ($loaded.Count -eq 3) 'Load all configured keys'
     $resolved = Resolve-LabTarget -Overrides @{} -EnvFile $envFile
@@ -117,7 +140,8 @@ try {
     } finally { Pop-Location }
     Assert-True ($global:ApimEnvironmentTestContext.Calls -eq 8) 'Snapshot integrations issue only four mocked reads each'
 
-    $global:ApimEnvironmentTestContext.Expected = @{ ApimName = 'apim-resize-poc-override' }
+    $global:ApimEnvironmentTestContext.Expected = $lab.Clone()
+    $global:ApimEnvironmentTestContext.Expected.ApimName = 'apim-resize-poc-override'
     foreach ($name in @('Invoke-SubnetExperiment.ps1', 'Invoke-SubnetMigration.ps1')) {
         $entry = Join-Path $scripts $name
         $snapshot = & $entry -Action Snapshot -ApimName 'apim-resize-poc-override' -EvidenceRoot (Join-Path $root 'overrides')
