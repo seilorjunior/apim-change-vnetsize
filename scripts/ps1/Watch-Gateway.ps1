@@ -5,8 +5,8 @@ param(
     [ValidateRange(1, 1440)][int]$DurationMinutes = 180,
     [ValidateRange(1, 60)][int]$IntervalSeconds = 5,
     [ValidateRange(1, 120)][int]$RequestTimeoutSeconds = 10,
-    [string]$EvidenceRoot = (Join-Path $PSScriptRoot '..\artifacts'),
-    [string]$EnvFile = (Join-Path $PSScriptRoot '..\.env')
+    [string]$EvidenceRoot = (Join-Path $PSScriptRoot '..\..\artifacts'),
+    [string]$EnvFile = (Join-Path $PSScriptRoot '..\..\.env')
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')

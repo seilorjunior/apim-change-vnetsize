@@ -1,8 +1,8 @@
 #Requires -Version 7.0
-. (Join-Path $PSScriptRoot '..\scripts\Common.ps1')
+. (Join-Path $PSScriptRoot '..\..\scripts\ps1\Common.ps1')
 
 function Get-TestEnvironment {
-    param([string]$EnvFile = (Join-Path $PSScriptRoot '..\.env.test'))
+    param([string]$EnvFile = (Join-Path $PSScriptRoot '..\..\.env.test'))
     if ([IO.Path]::GetFileName($EnvFile) -eq '.env') {
         throw 'Offline tests must not load operational .env files. Use a synthetic .env.test file.'
     }

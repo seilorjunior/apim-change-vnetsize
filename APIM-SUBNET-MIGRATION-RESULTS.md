@@ -27,6 +27,20 @@ Operational scripts read `.env`; [offline tests](README.md#offline-test-configur
 read a separate synthetic `.env.test`. Offline test results do not replace the
 historical Azure execution evidence summarized here.
 
+This recorded execution used PowerShell. A [native Bash equivalent](README.md#native-bash-usage)
+is also available, with local mocked validation only; it has not been run against
+Azure and does not add new cloud execution evidence to this report.
+
+The current PowerShell entrypoint is
+[scripts/ps1/Invoke-SubnetMigration.ps1](scripts/ps1/Invoke-SubnetMigration.ps1);
+the Bash counterpart is
+[scripts/sh/invoke-subnet-migration.sh](scripts/sh/invoke-subnet-migration.sh).
+These are current source locations, not immutable copies of the historical
+execution. Folder reorganization does not change the evidence paths, recorded
+timestamps or outcomes below. See the
+[shell comparison](README.md#choosing-powershell-or-bash) for prerequisites and
+parameter mappings, and do not rerun `Run` on the already-expanded lab.
+
 ## Duration and stages
 
 The `Run` execution started on **September 23, 2026, at 14:16:38** and finished at **15:29:26**, in **UTC-3**. The exact UTC timestamps are `2026-09-23T17:16:38.0116511Z` and `2026-09-23T18:29:26.6558675Z`; the difference is **4,368.644 seconds**.
@@ -89,4 +103,4 @@ Execution logs and artifacts are excluded from Git. The evidence links below req
 - [Complete log with stage timestamps and durations](artifacts/20260923T171638009Z-Migration-Run-46c7dcf63e194f4d82019382d979b48b/migration.log)
 - [Final APIM and subnet snapshot](artifacts/20260923T171638009Z-Migration-Run-46c7dcf63e194f4d82019382d979b48b/MoveBack-after.json)
 - [Final HTTP check result](artifacts/20260923T171638009Z-Migration-Run-46c7dcf63e194f4d82019382d979b48b/MoveBack-http-after.json)
-- [Executed script](scripts/Invoke-SubnetMigration.ps1)
+- [PowerShell migration script, current source location](scripts/ps1/Invoke-SubnetMigration.ps1)

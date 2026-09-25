@@ -1,6 +1,6 @@
 #Requires -Version 7.0
 [CmdletBinding()]
-param([string]$TestEnvFile = (Join-Path $PSScriptRoot '..\.env.test'))
+param([string]$TestEnvFile = (Join-Path $PSScriptRoot '..\..\.env.test'))
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $testEnvironment = Get-TestEnvironment -EnvFile $TestEnvFile
@@ -18,7 +18,7 @@ function Assert-Throws {
 }
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("apim-env-tests-{0}" -f [guid]::NewGuid().ToString('N'))
-$scripts = Join-Path $root 'scripts'
+$scripts = Join-Path $root 'scripts\ps1'
 $envFile = Join-Path $root '.env'
 $missingFile = Join-Path $root '.env.missing'
 $lab = $testEnvironment.Target
@@ -118,7 +118,7 @@ try {
         [IO.File]::WriteAllLines($envFile, [string[]]$case.Lines)
         Assert-Throws { Resolve-LabTarget -Overrides @{} -EnvFile $envFile } $case.Pattern
         foreach ($name in @('Invoke-SubnetExperiment.ps1', 'Invoke-SubnetMigration.ps1')) {
-            $entry = Join-Path $PSScriptRoot "..\scripts\$name"
+            $entry = Join-Path $PSScriptRoot "..\..\scripts\ps1\$name"
             $evidence = Join-Path $root 'invalid-evidence'
             Assert-Throws { & $entry -Action Snapshot -EnvFile $envFile -EvidenceRoot $evidence } $case.Pattern
             Assert-True (-not (Test-Path -LiteralPath $evidence)) "$name invalid target creates no run artifacts"
@@ -128,17 +128,30 @@ try {
 
     $valid | Set-Content -LiteralPath $envFile -Encoding utf8
     foreach ($name in @('Common.ps1', 'Invoke-SubnetExperiment.ps1', 'Invoke-SubnetMigration.ps1')) {
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\scripts\$name") -Destination (Join-Path $scripts $name)
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\..\scripts\ps1\$name") -Destination (Join-Path $scripts $name)
     }
     Push-Location $scripts
     try {
         foreach ($name in @('Invoke-SubnetExperiment.ps1', 'Invoke-SubnetMigration.ps1')) {
             $entry = Join-Path $scripts $name
-            $snapshot = & $entry -Action Snapshot -EvidenceRoot (Join-Path $root 'snapshots')
-            Assert-True ($snapshot -is [hashtable] -and $snapshot.apim.id -eq 'mock') "$name finds project-root .env from scripts directory"
+            $snapshot = & $entry -Action Snapshot
+            Assert-True ($snapshot -is [hashtable] -and $snapshot.apim.id -eq 'mock') "$name finds project-root .env from scripts/ps1 directory"
         }
     } finally { Pop-Location }
     Assert-True ($global:ApimEnvironmentTestContext.Calls -eq 8) 'Snapshot integrations issue only four mocked reads each'
+    $defaultEvidence = @(Get-ChildItem -LiteralPath (Join-Path $root 'artifacts') -Filter before.json -Recurse)
+    Assert-True ($defaultEvidence.Count -eq 2) 'Both scripts save default evidence at the project root'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'scripts\artifacts'))) 'No evidence is saved inside scripts'
+
+    $testScripts = Join-Path $root 'tests\ps1'
+    New-Item -ItemType Directory -Path $testScripts | Out-Null
+    $testHelper = Join-Path $testScripts 'Common.ps1'
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Common.ps1') -Destination $testHelper
+    $testLines | Set-Content -LiteralPath $testFixture -Encoding utf8
+    $defaultTestEnvironment = & { . $testHelper; Get-TestEnvironment }
+    Assert-True ($defaultTestEnvironment.Target.ApimName -eq $lab.ApimName) 'Moved test helper defaults to project-root .env.test'
+    Remove-Item -LiteralPath $testFixture
+    Assert-Throws { & { . $testHelper; Get-TestEnvironment } } 'not found.*\.env.test.example'
 
     $global:ApimEnvironmentTestContext.Expected = $lab.Clone()
     $global:ApimEnvironmentTestContext.Expected.ApimName = 'apim-resize-poc-override'
@@ -149,7 +162,7 @@ try {
     }
     Assert-True ($global:ApimEnvironmentTestContext.Calls -eq 16) 'Overrides preserve read-only snapshot operations'
 
-    foreach ($file in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\scripts') -Filter '*.ps1') {
+    foreach ($file in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\..\scripts\ps1') -Filter '*.ps1') {
         $parseErrors = $null
         [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
         Assert-True ($parseErrors.Count -eq 0) "$($file.Name) parses cleanly"

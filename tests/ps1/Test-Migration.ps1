@@ -1,6 +1,6 @@
 #Requires -Version 7.0
 [CmdletBinding()]
-param([string]$TestEnvFile = (Join-Path $PSScriptRoot '..\.env.test'))
+param([string]$TestEnvFile = (Join-Path $PSScriptRoot '..\..\.env.test'))
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $testEnvironment = Get-TestEnvironment -EnvFile $TestEnvFile
@@ -40,7 +40,7 @@ $fixture = @{
     temporary = $null
 } | ConvertTo-Json -Depth 30
 $lab = @{ SubscriptionId = $subscription; ResourceGroup = $group; ApimName = $apimName }
-$migration = Join-Path $PSScriptRoot '..\scripts\Invoke-SubnetMigration.ps1'
+$migration = Join-Path $PSScriptRoot '..\..\scripts\ps1\Invoke-SubnetMigration.ps1'
 $evidence = Join-Path ([IO.Path]::GetTempPath()) ("apim-migration-tests-{0}" -f [guid]::NewGuid().ToString('N'))
 if (Get-Variable ApimMigrationTestContext -Scope Global -ErrorAction SilentlyContinue) {
     throw 'A test context already exists; use a fresh PowerShell process.'

@@ -6,8 +6,8 @@ param(
     [guid]$SubscriptionId,
     [ValidatePattern('^rg-apim-resize-poc[-a-zA-Z0-9]*$')][string]$ResourceGroup,
     [ValidatePattern('^apim-resize-poc-[a-zA-Z0-9-]+$')][string]$ApimName,
-    [string]$EvidenceRoot = (Join-Path $PSScriptRoot '..\artifacts'),
-    [string]$EnvFile = (Join-Path $PSScriptRoot '..\.env')
+    [string]$EvidenceRoot = (Join-Path $PSScriptRoot '..\..\artifacts'),
+    [string]$EnvFile = (Join-Path $PSScriptRoot '..\..\.env')
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')

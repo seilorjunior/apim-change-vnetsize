@@ -9,8 +9,8 @@ param(
     [ValidatePattern('^apim-resize-poc-[a-zA-Z0-9-]+$')][string]$ApimName,
     [ValidateRange(1, 14400)][int]$TimeoutSeconds = 7200,
     [ValidateRange(1, 120)][int]$PollSeconds = 30,
-    [string]$EvidenceRoot = (Join-Path $PSScriptRoot '..\artifacts'),
-    [string]$EnvFile = (Join-Path $PSScriptRoot '..\.env')
+    [string]$EvidenceRoot = (Join-Path $PSScriptRoot '..\..\artifacts'),
+    [string]$EnvFile = (Join-Path $PSScriptRoot '..\..\.env')
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')

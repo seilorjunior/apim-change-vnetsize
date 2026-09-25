@@ -1,6 +1,6 @@
 #Requires -Version 7.0
 [CmdletBinding()]
-param([string]$TestEnvFile = (Join-Path $PSScriptRoot '..\.env.test'))
+param([string]$TestEnvFile = (Join-Path $PSScriptRoot '..\..\.env.test'))
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $testEnvironment = Get-TestEnvironment -EnvFile $TestEnvFile
@@ -167,7 +167,7 @@ function Invoke-WebRequest {
 function Start-Sleep {
     throw 'TestStopAfterOneSample'
 }
-$experiment = Join-Path $PSScriptRoot '..\scripts\Invoke-SubnetExperiment.ps1'
+$experiment = Join-Path $PSScriptRoot '..\..\scripts\ps1\Invoke-SubnetExperiment.ps1'
 $evidence = Join-Path ([IO.Path]::GetTempPath()) "apim-resize-tests-$([guid]::NewGuid().ToString('N'))"
 try {
     foreach ($removedAction in @('MoveTemporary', 'ResizeEmpty', 'MoveBack')) {
@@ -205,7 +205,7 @@ try {
     Assert-Throws { & $experiment -Action TryResizeOccupied @labArgs -EvidenceRoot $evidence -Confirm:$false } 'CLI success without /26 must fail postcondition validation.'
     $success = @(Get-ChildItem $evidence -Filter result.json -Recurse | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } | Where-Object outcome -eq 'ControlPlaneSucceeded')
     Assert-True ($success.Count -eq 1 -and $global:ApimResizeTestContext.Mutations -eq 3) 'Failed postconditions must not create a success result or retry.'
-    $monitor = Join-Path $PSScriptRoot '..\scripts\Watch-Gateway.ps1'
+    $monitor = Join-Path $PSScriptRoot '..\..\scripts\ps1\Watch-Gateway.ps1'
     Assert-Throws {
         & $monitor -Url 'https://example.com/subnet-poc/health' -EvidenceRoot $evidence
     } 'Monitor must reject non-lab endpoints.'
@@ -216,10 +216,10 @@ try {
         Assert-Throws { & $monitor -Url $url -EnvFile $TestEnvFile -EvidenceRoot $invalidEvidence } 'Invalid explicit URLs must not fall back to configuration.'
     }
     $monitorProject = Join-Path $evidence 'monitor-project'
-    $monitorScripts = Join-Path $monitorProject 'scripts'
+    $monitorScripts = Join-Path $monitorProject 'scripts\ps1'
     New-Item -ItemType Directory -Path $monitorScripts -Force | Out-Null
     foreach ($name in @('Common.ps1', 'Watch-Gateway.ps1')) {
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\scripts\$name") -Destination $monitorScripts
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\..\scripts\ps1\$name") -Destination $monitorScripts
     }
     $monitorConfig = Join-Path $monitorProject '.env'
     foreach ($lines in @(

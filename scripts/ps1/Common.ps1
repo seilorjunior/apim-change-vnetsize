@@ -2,7 +2,7 @@
 Set-StrictMode -Version Latest
 
 function Get-LabEnvironment {
-    param([string]$EnvFile = (Join-Path $PSScriptRoot '..\.env'))
+    param([string]$EnvFile = (Join-Path $PSScriptRoot '..\..\.env'))
     if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
         throw "Local environment file not found: $EnvFile. Copy .env.example to .env and fill in your lab values, or supply all target parameters."
     }
@@ -37,7 +37,7 @@ function Get-LabEnvironment {
 function Resolve-LabTarget {
     param(
         [Parameter(Mandatory)][hashtable]$Overrides,
-        [string]$EnvFile = (Join-Path $PSScriptRoot '..\.env')
+        [string]$EnvFile = (Join-Path $PSScriptRoot '..\..\.env')
     )
     $keys = @{
         SubscriptionId = 'AZURE_SUBSCRIPTION_ID'

@@ -113,7 +113,26 @@ Choose this option when you need to test the new environment in parallel and ret
 
 ## Automation and observed result
 
-The [option 2 script](scripts/Invoke-SubnetMigration.ps1) implements temporary-subnet migration **only for the classic Developer External lab**, with confirmation, `-WhatIf`, allocation-release polling, mock validation and evidence. See [execution and recovery](README.md#4-option-2-expand-using-a-temporary-subnet). It retains the temporary subnet and stops on failure without automatic rollback or retry.
+The [PowerShell option 2 script](scripts/ps1/Invoke-SubnetMigration.ps1) in
+[scripts/ps1](scripts/ps1) requires PowerShell 7 and an explicit `-Action`.
+It implements temporary-subnet migration **only for the classic Developer External lab**,
+with confirmation, `-WhatIf`, allocation-release polling, mock validation and evidence.
+See [execution and recovery](README.md#4-option-2-expand-using-a-temporary-subnet).
+It retains the temporary subnet and stops on failure without automatic rollback or retry.
+
+The [native Bash equivalent](scripts/sh/invoke-subnet-migration.sh) uses the same
+local `.env` configuration and lab restrictions, with `--what-if` and interactive
+mutation confirmation. It requires Bash 4+, Azure CLI, jq and curl, not PowerShell.
+See [Bash usage and recovery](README.md#native-bash-usage). Do not run both
+implementations concurrently. Bash validation is local and mocked; the historical
+Azure result below was obtained with PowerShell.
+
+The `.sh` scripts live in [scripts/sh](scripts/sh) and run with `bash`, not `sh`.
+Both implementations retain configuration and evidence at the repository root.
+Their offline suites live in [tests/ps1](tests/ps1) and [tests/sh](tests/sh) and
+use synthetic `.env.test`, never the operational `.env`. See the
+[script and parameter comparison](README.md#choosing-powershell-or-bash) before
+switching shells; matching safeguards do not imply identical command syntax.
 
 Option 2 completed on September 23, 2026, with outcome `Verified` in **1 hour, 12 minutes and 49 seconds**. APIM returned to the original /26 subnet with state `Succeeded` and a successful final HTTP check. This duration does not measure API downtime. See the [detailed results](APIM-SUBNET-MIGRATION-RESULTS.md).
 

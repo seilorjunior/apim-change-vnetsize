@@ -1,6 +1,6 @@
 # PoC: expand an Azure API Management subnet
 
-An isolated lab using **Bicep and PowerShell 7**, with two separate procedures:
+An isolated lab using **Bicep**, with **PowerShell 7 or native Bash** operational scripts and two separate procedures:
 
 1. **Direct experiment:** attempt to expand the occupied subnet from /27 to /26 while keeping APIM attached, and record Azure's response.
 2. **Option 2:** move APIM to a temporary subnet, expand the empty original subnet, and move APIM back. The lab migration completed successfully on September 23, 2026, in **1 hour, 12 minutes and 49 seconds**. See the [migration results](APIM-SUBNET-MIGRATION-RESULTS.md).
@@ -97,18 +97,82 @@ The mock API is public, requires no subscription key, exposes no real data and c
 
 ## Files
 
+PowerShell scripts and tests live in [scripts/ps1](scripts/ps1) and
+[tests/ps1](tests/ps1). Native Bash equivalents live in
+[scripts/sh](scripts/sh) and [tests/sh](tests/sh). Local configuration
+(`.env` and `.env.test`) and the ignored `artifacts` directory remain at the
+repository root. Run the examples below from that root.
+
 - [Approved plan](.azure/infrastructure-plan.json)
 - [Bicep infrastructure](infra/main.bicep)
-- [Experiment actions](scripts/Invoke-SubnetExperiment.ps1)
-- [Option 2 migration](scripts/Invoke-SubnetMigration.ps1)
+- [Experiment actions](scripts/ps1/Invoke-SubnetExperiment.ps1)
+- [Option 2 migration](scripts/ps1/Invoke-SubnetMigration.ps1)
 - [Comparison of the three alternatives](APIM-SUBNET-EXPANSION-OPTIONS.md)
 - [Migration results](APIM-SUBNET-MIGRATION-RESULTS.md)
-- [Optional HTTP monitor](scripts/Watch-Gateway.ps1)
-- [Offline tests](tests/Test-Local.ps1)
-- [Offline migration tests](tests/Test-Migration.ps1)
+- [Optional HTTP monitor](scripts/ps1/Watch-Gateway.ps1)
+- [Offline tests](tests/ps1/Test-Local.ps1)
+- [Offline migration tests](tests/ps1/Test-Migration.ps1)
 - [Local configuration template](.env.example)
 - [Synthetic test configuration template](.env.test.example)
-- [Offline configuration tests](tests/Test-Environment.ps1)
+- [Offline configuration tests](tests/ps1/Test-Environment.ps1)
+- [Native Bash experiment](scripts/sh/invoke-subnet-experiment.sh)
+- [Native Bash migration](scripts/sh/invoke-subnet-migration.sh)
+- [Native Bash HTTP monitor](scripts/sh/watch-gateway.sh)
+- [Shared Bash helpers](scripts/sh/common.sh)
+- [Offline Bash tests](tests/sh/test-bash.sh)
+
+## Choosing PowerShell or Bash
+
+The `.ps1` files run with **PowerShell 7** (`pwsh`). The `.sh` files run with
+**Bash 4+** (`bash`), not plain `sh`. Bash is a native implementation and does
+not invoke PowerShell. Choose one implementation for each approved operation;
+do not run network mutations from both shells concurrently.
+
+| Purpose | PowerShell | Native Bash |
+|---|---|---|
+| Attempt one occupied-subnet resize | [Invoke-SubnetExperiment.ps1](scripts/ps1/Invoke-SubnetExperiment.ps1) | [invoke-subnet-experiment.sh](scripts/sh/invoke-subnet-experiment.sh) |
+| Migrate through a temporary subnet | [Invoke-SubnetMigration.ps1](scripts/ps1/Invoke-SubnetMigration.ps1) | [invoke-subnet-migration.sh](scripts/sh/invoke-subnet-migration.sh) |
+| Sample gateway health during changes | [Watch-Gateway.ps1](scripts/ps1/Watch-Gateway.ps1) | [watch-gateway.sh](scripts/sh/watch-gateway.sh) |
+| Shared configuration and safety helpers | [Common.ps1](scripts/ps1/Common.ps1) | [common.sh](scripts/sh/common.sh) |
+| Offline regression tests | [tests/ps1](tests/ps1), three `Test-*.ps1` suites | [test-bash.sh](tests/sh/test-bash.sh), one suite |
+| Synthetic test configuration loader | [tests/ps1/Common.ps1](tests/ps1/Common.ps1) | [tests/sh/common.sh](tests/sh/common.sh) |
+
+Keep each helper beside its entrypoints and preserve the folder layout. Scripts
+resolve default configuration and evidence paths from the repository root,
+two levels above their folders. Helpers support the entrypoints; running a
+helper alone does not perform an experiment or migration.
+
+PowerShell operations require Azure CLI; HTTP requests use PowerShell's built-in
+web commands. Bash operations require Azure CLI, jq and curl in the same
+Linux or WSL environment. Use backslashes in the Windows PowerShell examples
+and POSIX paths in Bash. Initial deployment and cleanup examples in this README
+remain PowerShell examples; the Bash entrypoints operate on an already-deployed lab.
+
+### Equivalent parameters
+
+| Purpose | PowerShell | Bash |
+|---|---|---|
+| Select action | `-Action Snapshot` | `--action Snapshot` |
+| Select operational configuration | `-EnvFile PATH` | `--env-file PATH` |
+| Override target | `-SubscriptionId`, `-ResourceGroup`, `-ApimName` | `--subscription-id`, `--resource-group`, `--apim-name` |
+| Preview without submitting mutations | `-WhatIf` | `--what-if` |
+| Bypass interactive confirmation for an approved run | `-Confirm:$false` | `--yes` |
+| Select evidence directory | `-EvidenceRoot PATH` | `--output-root PATH` |
+| Set migration polling | `-TimeoutSeconds`, `-PollSeconds` | `--timeout-seconds`, `--poll-seconds` |
+| Override monitor endpoint | `-Url` | `--url` |
+| Set monitor timing | `-DurationMinutes`, `-IntervalSeconds`, `-RequestTimeoutSeconds` | `--duration-minutes`, `--interval-seconds`, `--request-timeout-seconds` |
+| Select offline test configuration | `-TestEnvFile PATH` | `--test-env-file PATH` |
+
+Action names retain their exact spelling in both shells. PowerShell migration
+requires `-Action`; both Bash operation entrypoints default to `Snapshot`.
+Use an explicit action in runbooks. `Snapshot` and mutation previews still
+query Azure and write local evidence; only the mocked test suites are offline.
+Neither implementation retries mutations, rolls back or deletes resources automatically.
+
+For operational instructions, see the [direct experiment](#3-attempt-to-expand-the-occupied-subnet),
+[option 2 migration](#4-option-2-expand-using-a-temporary-subnet) and
+[native Bash usage](#native-bash-usage). The September 23 cloud execution used
+PowerShell; Bash has only local mocked validation.
 
 ## Local environment configuration
 
@@ -150,11 +214,16 @@ there is no interpolation, command execution, escape processing, inline-comment
 removal or process-environment modification. Unknown or duplicate keys are rejected.
 Use only the keys listed in the example.
 
+The native Bash entrypoints use the same local configuration contract. Their
+equivalent flags are `--env-file`, `--subscription-id`, `--resource-group`,
+`--apim-name` and monitor `--url`. Do **not** run `source .env` or `eval` its
+contents: the scripts parse values literally. See [native Bash usage](#native-bash-usage).
+
 For manual deployment, inspection or cleanup commands, load variables in each new terminal
 from the project root (this block does not call Azure):
 
 ```powershell
-. .\scripts\Common.ps1
+. .\scripts\ps1\Common.ps1
 $settings = Get-LabEnvironment
 $lab = Resolve-LabTarget -Overrides @{}
 $subscription = $lab.SubscriptionId
@@ -194,18 +263,50 @@ if (-not (Test-Path -LiteralPath '.env.test')) {
 }
 ```
 
-All three test entrypoints accept `-TestEnvFile`:
+All three PowerShell test entrypoints accept `-TestEnvFile`:
 
 ```powershell
-pwsh -File .\tests\Test-Environment.ps1 -TestEnvFile 'C:\labs\.env.test'
-pwsh -File .\tests\Test-Local.ps1 -TestEnvFile 'C:\labs\.env.test'
-pwsh -File .\tests\Test-Migration.ps1 -TestEnvFile 'C:\labs\.env.test'
+pwsh -File .\tests\ps1\Test-Environment.ps1 -TestEnvFile 'C:\labs\.env.test'
+pwsh -File .\tests\ps1\Test-Local.ps1 -TestEnvFile 'C:\labs\.env.test'
+pwsh -File .\tests\ps1\Test-Migration.ps1 -TestEnvFile 'C:\labs\.env.test'
+```
+
+For Bash, create the same synthetic configuration without overwriting an existing
+file, then run the independent offline suite:
+
+```bash
+if [ ! -e .env.test ]; then
+    cp .env.test.example .env.test
+fi
+bash tests/sh/test-bash.sh
+# Optional alternative synthetic configuration:
+bash tests/sh/test-bash.sh --test-env-file /absolute/path/to/.env.test
+```
+
+The Bash suite requires Bash 4+, jq and curl, uses command mocks for Azure and
+HTTP, and does not require PowerShell or Azure sign-in. Its `--test-env-file`
+follows the same reserved synthetic identity rules below.
+
+To validate a fresh clone without creating either local configuration file,
+select the checked-in synthetic template explicitly:
+
+```powershell
+pwsh -File .\tests\ps1\Test-Environment.ps1 -TestEnvFile .\.env.test.example
+pwsh -File .\tests\ps1\Test-Local.ps1 -TestEnvFile .\.env.test.example
+pwsh -File .\tests\ps1\Test-Migration.ps1 -TestEnvFile .\.env.test.example
+```
+
+```bash
+for file in scripts/sh/*.sh tests/sh/*.sh; do
+    bash -n "$file" || exit 1
+done
+bash tests/sh/test-bash.sh --test-env-file .env.test.example
 ```
 
 The default `.env.test` path is relative to the project root, not the current
 directory. Missing or invalid test configuration fails explicitly; there is no
 fallback to `.env`, the example file or shell environment variables. The shared
-[test loader](tests/Common.ps1) reuses the literal environment parser and rejects
+[test loader](tests/ps1/Common.ps1) reuses the literal environment parser and rejects
 files named `.env`. Test configuration accepts exactly these four required keys:
 
 | Key | Synthetic fixture requirement |
@@ -228,14 +329,20 @@ guards or make the scripts suitable for arbitrary networks.
 
 ## 1. Prepare and validate locally
 
-Requires PowerShell 7 (`pwsh`), Azure CLI and Bicep CLI. Deployment also requires Azure sign-in, an authorized subscription, registered `Microsoft.Network` and `Microsoft.ApiManagement` providers, and permissions to create, modify and delete lab resources. No script changes the default subscription.
+The PowerShell examples require PowerShell 7 (`pwsh`), Azure CLI and Bicep CLI.
+The [native Bash operational path](#native-bash-usage) instead requires Bash 4+,
+Azure CLI, jq and curl; it does not call PowerShell. The initial Bicep deployment
+examples below remain PowerShell examples. Deployment also requires Azure sign-in,
+an authorized subscription, registered `Microsoft.Network` and
+`Microsoft.ApiManagement` providers, and permissions to create, modify and delete
+lab resources. No script changes the default subscription.
 
 From the project root, after creating `.env.test` as described above:
 
 ```powershell
-pwsh -File .\tests\Test-Local.ps1
-pwsh -File .\tests\Test-Migration.ps1
-pwsh -File .\tests\Test-Environment.ps1
+pwsh -File .\tests\ps1\Test-Local.ps1
+pwsh -File .\tests\ps1\Test-Migration.ps1
+pwsh -File .\tests\ps1\Test-Environment.ps1
 bicep build .\infra\main.bicep --outfile "$env:TEMP\apim-resize-poc-validation.json"
 ```
 
@@ -300,8 +407,8 @@ $lab = @{
   ResourceGroup = $rg
   ApimName = $apim
 }
-.\scripts\Invoke-SubnetExperiment.ps1 @lab -Action Snapshot
-.\scripts\Invoke-SubnetExperiment.ps1 @lab -Action TryResizeOccupied -WhatIf
+.\scripts\ps1\Invoke-SubnetExperiment.ps1 @lab -Action Snapshot
+.\scripts\ps1\Invoke-SubnetExperiment.ps1 @lab -Action TryResizeOccupied -WhatIf
 ```
 
 `Snapshot` is read-only in Azure and can diagnose incomplete states. `-WhatIf` queries resources and saves local evidence without changing Azure. This script's only mutating action, `TryResizeOccupied`, checks tags, names, IDs, SKU, topology, APIM attachment to the original subnet and the /27 prefix before requesting confirmation.
@@ -311,7 +418,7 @@ The region check accepts equivalent provider representations such as `East US 2`
 After reviewing the target, run the actual attempt and accept confirmation only for the lab:
 
 ```powershell
-.\scripts\Invoke-SubnetExperiment.ps1 @lab -Action TryResizeOccupied
+.\scripts\ps1\Invoke-SubnetExperiment.ps1 @lab -Action TryResizeOccupied
 ```
 
 - **If it fails:** the script stops with an error and preserves Azure's message. Check the code in `result.json` and the Activity Log. Do not assume every failure is `SubnetInUse`.
@@ -328,7 +435,7 @@ After reviewing the target, run the actual attempt and accept confirmation only 
 
 ## 4. Option 2: expand using a temporary subnet
 
-Use [Invoke-SubnetMigration.ps1](scripts/Invoke-SubnetMigration.ps1) **only in the classic Developer External lab**. It does not support Premium production environments. It requires one unit, platform stv2, tags `purpose=apim-subnet-resize-poc` and `environment=lab`, default DNS, a managed public IP and no peering, UDR, NAT or subnet delegation.
+Use [Invoke-SubnetMigration.ps1](scripts/ps1/Invoke-SubnetMigration.ps1) **only in the classic Developer External lab**. It does not support Premium production environments. It requires one unit, platform stv2, tags `purpose=apim-subnet-resize-poc` and `environment=lab`, default DNS, a managed public IP and no peering, UDR, NAT or subnet delegation.
 
 `Run` sequence:
 
@@ -344,8 +451,8 @@ The script checks HTTP 200 and the exact JSON before and after each stage. A fai
 Preparation for the deployed lab, in PowerShell 7:
 
 ```powershell
-.\scripts\Invoke-SubnetMigration.ps1 -Action Snapshot
-.\scripts\Invoke-SubnetMigration.ps1 -Action Run -WhatIf
+.\scripts\ps1\Invoke-SubnetMigration.ps1 -Action Snapshot
+.\scripts\ps1\Invoke-SubnetMigration.ps1 -Action Run -WhatIf
 ```
 
 The migration script reads the target from the local `.env` file.
@@ -359,7 +466,7 @@ correctly refuses to repeat the initial /27 workflow against that final state.
 **Only after approving the change window, downtime risk and potential IP changes**, run:
 
 ```powershell
-.\scripts\Invoke-SubnetMigration.ps1 -Action Run
+.\scripts\ps1\Invoke-SubnetMigration.ps1 -Action Run
 ```
 
 - `Run` confirmation covers all four mutating stages. Do not remove confirmation without reviewing the target.
@@ -420,7 +527,7 @@ For an individual stage, replace `Run` with the action name and run with `-WhatI
 Monitoring is not required to record Azure's response. To observe the gateway during the attempt, fill in `APIM_NAME` in the local `.env`, then keep this command running in a separate terminal. No manual variable-loading step is needed:
 
 ```powershell
-.\scripts\Watch-Gateway.ps1 `
+.\scripts\ps1\Watch-Gateway.ps1 `
   -DurationMinutes 180 -IntervalSeconds 5
 ```
 
@@ -481,6 +588,102 @@ See the [full migration report and stage durations](APIM-SUBNET-MIGRATION-RESULT
 The temporary subnet was retained. These results do not measure total API
 downtime or establish Premium availability or behavior. Resources were retained
 at completion and incur costs until explicitly approved deletion.
+
+## Native Bash usage
+
+Use these entrypoints for the **same already-deployed classic Developer External
+lab**, not arbitrary networks. Run them from Bash 4+ on Linux or WSL with Azure CLI,
+jq and curl installed in that environment. On Windows, enter WSL before using
+these examples; use POSIX paths inside Bash. macOS's bundled Bash 3.2 is not
+supported; a newer Bash is required. Shell files use LF line endings, enforced
+by [.gitattributes](.gitattributes), so Windows checkouts remain runnable in WSL.
+
+Create the ignored operational configuration only if it does not exist, then edit
+it locally with your lab values:
+
+```bash
+if [ ! -e .env ]; then
+    cp .env.example .env
+fi
+```
+
+Do not use the synthetic test configuration for real Azure operations. The
+scripts automatically load the project-root `.env`, even when invoked from
+another directory. Use `--env-file /absolute/path/to/local.env` to select another
+local configuration. Supplying all three explicit target flags bypasses the file;
+supplying an explicitly empty target is an error.
+
+### Direct occupied-subnet experiment
+
+```bash
+bash scripts/sh/invoke-subnet-experiment.sh --action Snapshot
+bash scripts/sh/invoke-subnet-experiment.sh --action TryResizeOccupied --what-if
+```
+
+Only after approving the target and change risk, submit the single resize attempt:
+
+```bash
+bash scripts/sh/invoke-subnet-experiment.sh --action TryResizeOccupied
+```
+
+Azure rejection is recorded as a failure, not hidden or retried. The direct
+experiment never starts the temporary-subnet migration automatically.
+
+### Temporary-subnet migration
+
+```bash
+bash scripts/sh/invoke-subnet-migration.sh --action Snapshot
+bash scripts/sh/invoke-subnet-migration.sh --action Run --what-if
+```
+
+Only after approving the change window, potential downtime and IP changes:
+
+```bash
+bash scripts/sh/invoke-subnet-migration.sh --action Run
+```
+
+The complete sequence and lab guards are described in
+[option 2](#4-option-2-expand-using-a-temporary-subnet). `Run` requires the initial
+/27 state and no temporary subnet; it refuses the already-expanded historical lab.
+The stage actions are `PrepareTemporary`, `MoveTemporary`, `ResizeEmpty` and
+`MoveBack`. For recovery, inspect a fresh `Snapshot` and the saved evidence before
+selecting one stage; never blindly rerun `Run`.
+
+Both Bash experiment and migration default to `Snapshot`. Mutations require
+interactive confirmation; `--yes` bypasses it **only for an explicitly approved,
+reviewed noninteractive run**. `--what-if` still queries Azure and writes local
+evidence; it is not an offline test or proof of Azure acceptance. Use
+`--output-root /absolute/path/to/private-artifacts` for alternative local evidence
+storage, keeping that directory outside publishable files.
+
+Migration waits default to 7,200 seconds and poll every 30 seconds, configurable
+with `--timeout-seconds` and `--poll-seconds`. Each APIM move is submitted once
+asynchronously, then polled for both `Succeeded` and the exact target subnet.
+Allocation-release polling precedes the single subnet update. A timeout or failed
+HTTP check stops the script but does not cancel Azure work already submitted.
+There is no automatic rollback, mutation retry, temporary-subnet cleanup or
+distributed lock. Do not run Bash and PowerShell mutations concurrently.
+
+### Continuous HTTP monitor
+
+In a separate Bash terminal, start the monitor before any approved changes:
+
+```bash
+bash scripts/sh/watch-gateway.sh --duration-minutes 180 --interval-seconds 5
+```
+
+It derives the lab health URL from `.env`; `--url` explicitly overrides it and
+bypasses the file. Only the lab HTTPS endpoint is accepted, redirects are not
+followed, and success requires HTTP 200 with the expected mock JSON. CSV/JSONL
+samples and the summary remain local evidence. The summary reports sampled
+success percentage and nearest-rank p95 latency across successful samples only.
+A point-in-time stage health check does
+not replace continuous monitoring or measure total downtime.
+
+Use `--help` on each entrypoint for its full option list. Run the
+[offline Bash suite](#offline-test-configuration) before using these scripts.
+The September 23 Azure execution used PowerShell; the Bash equivalents have
+only local mocked validation and have **not** been executed against Azure.
 
 ## Explicit cleanup
 

@@ -8,6 +8,22 @@ initial deployment and direct experiment, which performed no migration or
 automatic cleanup. The separately authorized, subsequent option 2 migration
 is documented in the [migration results](../APIM-SUBNET-MIGRATION-RESULTS.md).
 
+### Current script layout
+
+The recorded deployment and direct experiment used PowerShell. Current
+PowerShell 7 entrypoints live in [scripts/ps1](../scripts/ps1), with three
+offline regression suites in [tests/ps1](../tests/ps1). Native Bash 4+
+counterparts live in [scripts/sh](../scripts/sh), with their independent
+offline suite in [tests/sh](../tests/sh). Bash operations require Azure CLI,
+jq and curl and do not invoke PowerShell.
+
+Both implementations use root `.env` for operations, root `.env.test` for
+synthetic offline tests and root `artifacts` for default evidence. See the
+[shell comparison](../README.md#choosing-powershell-or-bash) and
+[current offline validation commands](../README.md#offline-test-configuration).
+The historical validation counts and timestamps below remain unchanged; source
+paths reflect the current layout. Bash has not been executed against Azure.
+
 ## 2. Azure context
 
 - Subscription name and ID: local `.env`, `AZURE_SUBSCRIPTION_NAME` and `AZURE_SUBSCRIPTION_ID`.
@@ -60,7 +76,7 @@ applicable constraints.
 
 - [x] Bicep compilation: standalone `bicep build .\infra\main.bicep --outfile
   .\artifacts\deployment-eastus2\main.json`, passed, 2026-09-23T14:25:28Z.
-- [x] Offline safety/HTTP tests: `pwsh -NoProfile -File .\tests\Test-Local.ps1`,
+- [x] Offline safety/HTTP tests: `pwsh -NoProfile -File .\tests\ps1\Test-Local.ps1`,
   65 assertions passed; Azure mocked.
 - [x] Region-format regression fix: same command passed 71 assertions at
   2026-09-23T16:15:43Z. Editor diagnostics clean. The captured live Azure baseline
@@ -148,3 +164,23 @@ availability. See the separate migration report for the subsequent /26 result.
 
 Execution evidence under `artifacts` is excluded from Git; the links above
 require the local files and are not available in a fresh clone.
+
+## 9. Native Bash support (local implementation)
+
+Status: approved; implementation in progress. This extension does not change the historical
+deployment status above and does not authorize any new Azure operation.
+
+- Add native Bash entrypoints for the direct experiment, temporary-subnet
+  migration and HTTP monitor. Preserve the existing PowerShell entrypoints.
+- Use Bash 4+, Azure CLI, jq and curl, with shared helpers for literal local
+  `.env` parsing, explicit-parameter precedence, lab guards and JSON evidence.
+  Never execute or source environment-file contents.
+- Preserve explicit confirmation, read-only `--what-if`, single mutation
+  submission, allocation-release polling, timeout failures and no automatic
+  rollback, retry or cleanup.
+- Add offline Bash tests using synthetic `.env.test` configuration and mocked
+  Azure/HTTP calls; do not read operational `.env` during tests.
+- Add Bash usage and prerequisites to the README and relevant Markdown guides.
+  Keep documentation in English and real environment information local.
+- Validate Bash syntax, offline behavior, existing PowerShell regressions and
+  documentation examples locally. No deployment, commit or push is included.
